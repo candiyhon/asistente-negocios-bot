@@ -150,7 +150,7 @@ def webhook():
 
                         if negocio.estado_conversacion:
                             estado = negocio.estado_conversacion
-                            # (Lógica de estados de conversación completa aquí)
+                            # ... (Toda la lógica de estados de conversación va aquí)
                             db.session.remove()
                             return "OK", 200
                         
@@ -160,10 +160,10 @@ def webhook():
                         numeros_en_frase = [token.text for token in doc if token.like_num]
                         intencion_vender = (any(token.lemma_ in ["vender", "vendí"] for token in doc) or (len(numeros_en_frase) >= 2 and "por" in comando))
                         intencion_gasto = any(token.lemma_ in ["gastar", "gasté", "gasto", "pagué", "pagar"] for token in doc)
-                        # (etc...)
+                        # ... (etc...)
 
                         if intencion_vender:
-                            # (Lógica de venta completa aquí)
+                            # ... (Lógica de venta completa aquí)
                             pass
                         # (y el resto de los elif...)
         except Exception as e:

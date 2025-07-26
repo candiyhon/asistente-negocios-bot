@@ -149,6 +149,7 @@ def webhook():
                             return "OK", 200
 
                         if negocio.estado_conversacion:
+                            estado = negocio.estado_conversacion
                             # (Lógica de estados de conversación completa aquí)
                             db.session.remove()
                             return "OK", 200

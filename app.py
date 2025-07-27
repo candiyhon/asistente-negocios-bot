@@ -187,6 +187,7 @@ def webhook():
                         intencion_borrar = "borrar ultima venta" in comando
                         intencion_reiniciar = "reiniciar inventario" in comando or "restaurar datos" in comando
                         intencion_ayuda = comando in ["ayuda", "comandos", "?"]
+                        intencion_renombrar = "renombrar producto" in comando and "a" in comando
 
                         if intencion_ayuda:
                             mensaje_ayuda = (
@@ -194,7 +195,8 @@ def webhook():
                                 "📦 *INVENTARIO*\n"
                                 "• Para ver tu stock: `inventario`\n"
                                 "• Para añadir productos: `agregar producto [nombre] [cantidad]`\n"
-                                "• Para actualizar stock: `actualizar stock [nombre] [cantidad]`\n\n"
+                                "• Para actualizar stock: `actualizar stock [nombre] [cantidad]`\n"
+                                "• Para renombrar: `renombrar producto [viejo] a [nuevo]`\n\n"
                                 "💰 *VENTAS*\n"
                                 "• Para registrar una venta: `vendí 2 pizzas por 10`\n"
                                 "• O también: `2 pizzas por 10`\n\n"
@@ -208,10 +210,29 @@ def webhook():
                             )
                             enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_ayuda})
 
-                        elif intencion_configurar:
-                            # ... (lógica sin cambios)
-                            pass
-                        # (etc... con el resto de los elif)
+                        elif intencion_renombrar:
+                            try:
+                                # Extraemos el nombre viejo y el nuevo
+                                partes = comando.split(" a ")
+                                nombre_nuevo = partes[1].strip()
+                                parte_vieja = partes[0].replace("renombrar producto", "").strip()
+                                nombre_viejo = parte_vieja
+                                
+                                producto_a_renombrar = Producto.query.filter(db.func.lower(Producto.nombre) == db.func.lower(nombre_viejo)).first()
+                                
+                                if producto_a_renombrar:
+                                    producto_a_renombrar.nombre = nombre_nuevo
+                                    db.session.commit()
+                                    mensaje_respuesta = f"✅ Producto renombrado de '{nombre_viejo}' a '{nombre_nuevo}'."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                else:
+                                    mensaje_respuesta = f"❌ No encontré el producto '{nombre_viejo}' para renombrar."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                            except Exception:
+                                mensaje_respuesta = "❌ Formato incorrecto. Usa `renombrar producto [nombre viejo] a [nombre nuevo]`."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                        
+                        # (El resto de los `elif` para otros comandos)
 
         except Exception as e:
             print(f"❌ ERROR DETALLADO EN EL PROCESAMIENTO:")

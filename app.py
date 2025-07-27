@@ -62,10 +62,7 @@ def enviar_a_n8n(numero_destino, tipo_mensaje, payload_mensaje):
     data = { "telefono": numero_destino, "tipo_mensaje": tipo_mensaje, "payload": payload_mensaje }
     headers = { "Content-Type": "application/json" }
     try:
-        print(f"➡️  Enviando a n8n: {data}")
-        response = requests.post(n8n_webhook_url, headers=headers, json=data, timeout=10)
-        response.raise_for_status() 
-        print(f"✔️ Petición a n8n enviada con éxito. Estado: {response.status_code}")
+        requests.post(n8n_webhook_url, headers=headers, json=data, timeout=10).raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
         print(f"❌ ERROR al enviar la petición a n8n: {e}")
@@ -212,14 +209,11 @@ def webhook():
 
                         elif intencion_renombrar:
                             try:
-                                # Extraemos el nombre viejo y el nuevo
                                 partes = comando.split(" a ")
                                 nombre_nuevo = partes[1].strip()
                                 parte_vieja = partes[0].replace("renombrar producto", "").strip()
                                 nombre_viejo = parte_vieja
-                                
                                 producto_a_renombrar = Producto.query.filter(db.func.lower(Producto.nombre) == db.func.lower(nombre_viejo)).first()
-                                
                                 if producto_a_renombrar:
                                     producto_a_renombrar.nombre = nombre_nuevo
                                     db.session.commit()
@@ -231,8 +225,145 @@ def webhook():
                             except Exception:
                                 mensaje_respuesta = "❌ Formato incorrecto. Usa `renombrar producto [nombre viejo] a [nombre nuevo]`."
                                 enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+
+                        elif intencion_configurar:
+                            moneda_elegida = "USD"
+                            if "bolivares" in comando or "ves" in comando: moneda_elegida = "VES"
+                            negocio.moneda_predeterminada = moneda_elegida; db.session.commit()
+                            mensaje_respuesta = f"⚙️ Moneda configurada a {moneda_elegida}."
+                            enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
                         
-                        # (El resto de los `elif` para otros comandos)
+                        elif intencion_vender:
+                            if len(numeros_en_frase) >= 2:
+                                cantidad = int(numeros_en_frase[0]); precio = float(numeros_en_frase[1])
+                                try:
+                                    start_index = comando.find(numeros_en_frase[0]) + len(numeros_en_frase[0])
+                                    end_index = comando.rfind("por")
+                                    if end_index == -1 or end_index < start_index: raise ValueError("Patrón no encontrado")
+                                    nombre_producto = comando[start_index:end_index].strip()
+                                except Exception:
+                                    palabras_a_ignorar = ["vender", "vendí", "por"] + numeros_en_frase
+                                    candidatos = [token.lower_ for token in doc if token.text not in palabras_a_ignorar]
+                                    nombre_producto = " ".join(candidatos).strip()
+                                if nombre_producto:
+                                    moneda_actual = negocio.moneda_predeterminada if negocio else "USD"
+                                    producto_en_db = Producto.query.filter(db.func.lower(Producto.nombre) == db.func.lower(nombre_producto)).first()
+                                    if producto_en_db:
+                                        if producto_en_db.stock >= cantidad:
+                                            producto_en_db.stock -= cantidad
+                                            nueva_venta = Venta(producto_nombre=producto_en_db.nombre, cantidad=cantidad, precio_total=precio, moneda=moneda_actual)
+                                            db.session.add(nueva_venta); db.session.commit()
+                                            mensaje_respuesta = f"✅ Venta registrada: {cantidad} x {producto_en_db.nombre}.\nStock restante: {producto_en_db.stock} unidades."
+                                        else:
+                                            mensaje_respuesta = f"⚠️ No hay suficiente stock para '{producto_en_db.nombre}'. Quedan {producto_en_db.stock} unidades."
+                                        enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                    else:
+                                        mensaje_respuesta = f"❌ El producto '{nombre_producto}' no existe en tu inventario."
+                                        enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                else:
+                                    mensaje_respuesta = "❌ No pude identificar el nombre del producto."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                            else:
+                                mensaje_respuesta = "❌ Faltan datos en el comando de venta."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                        
+                        elif intencion_gasto:
+                            if not numeros_en_frase:
+                                mensaje_respuesta = "❌ No encontré un monto. Intenta con 'gasté 100 en transporte'."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                            else:
+                                monto_gasto = float(numeros_en_frase[0])
+                                descripcion_parts = []
+                                preposiciones = ['en', 'de', 'para']
+                                encontrado_prep = False
+                                for token in doc:
+                                    if token.lower_ in preposiciones and not encontrado_prep:
+                                        encontrado_prep = True; continue
+                                    if encontrado_prep and not token.like_num:
+                                        descripcion_parts.append(token.text)
+                                descripcion = " ".join(descripcion_parts) if descripcion_parts else "Gasto sin descripción"
+                                moneda_actual = negocio.moneda_predeterminada if negocio else "USD"
+                                nuevo_gasto = Gasto(descripcion=descripcion, monto=monto_gasto, moneda=moneda_actual)
+                                db.session.add(nuevo_gasto); db.session.commit()
+                                mensaje_respuesta = f"✅ Gasto registrado: {monto_gasto:,.2f} {moneda_actual} en '{descripcion}'."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+
+                        elif intencion_agregar:
+                            partes = comando.split()
+                            try:
+                                stock_inicial = int(partes[-1]); nombre_producto = " ".join(partes[2:-1]).lower()
+                                if not nombre_producto: raise ValueError("Nombre vacío")
+                                existe = Producto.query.filter(db.func.lower(Producto.nombre) == db.func.lower(nombre_producto)).first()
+                                if not existe:
+                                    nuevo_producto = Producto(nombre=nombre_producto, stock=stock_inicial)
+                                    db.session.add(nuevo_producto); db.session.commit()
+                                    mensaje_respuesta = f"📦 Producto '{nombre_producto}' agregado con {stock_inicial} unidades."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                else:
+                                    mensaje_respuesta = f"📦 El producto '{nombre_producto}' ya existe."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                            except (IndexError, ValueError):
+                                mensaje_respuesta = "❌ Formato incorrecto. Usa 'agregar producto [nombre] [cantidad]'."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                        
+                        elif intencion_actualizar:
+                            partes = comando.split()
+                            try:
+                                cantidad_a_sumar = int(partes[-1]); nombre_producto = " ".join(partes[2:-1]).lower()
+                                if not nombre_producto: raise ValueError("Nombre vacío")
+                                producto_en_db = Producto.query.filter(db.func.lower(Producto.nombre) == db.func.lower(nombre_producto)).first()
+                                if producto_en_db:
+                                    producto_en_db.stock += cantidad_a_sumar
+                                    db.session.commit()
+                                    mensaje_respuesta = f"📦 Stock de '{producto_en_db.nombre}' actualizado.\nNuevo stock: {producto_en_db.stock} unidades."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                else:
+                                    mensaje_respuesta = f"❌ El producto '{nombre_producto}' no existe."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                            except (IndexError, ValueError):
+                                mensaje_respuesta = "❌ Formato incorrecto. Usa 'actualizar stock [nombre] [cantidad]'."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                        
+                        elif intencion_reiniciar:
+                            negocio.estado_conversacion = 'esperando_confirmacion_reinicio'
+                            db.session.commit()
+                            mensaje_confirmacion = '¿Estás seguro de que quieres borrar TODOS los productos y ventas? Esta acción no se puede deshacer.\n\nEscribe *SÍ* para confirmar.'
+                            enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_confirmacion})
+
+                        elif intencion_inventario:
+                            todos_los_productos = Producto.query.order_by(Producto.nombre).all()
+                            if not todos_los_productos:
+                                mensaje_respuesta = "📦 Tu inventario está vacío."
+                            else:
+                                mensaje_respuesta = "📦 *Inventario Actual:*\n"
+                                for p in todos_los_productos:
+                                    mensaje_respuesta += f"- {p.nombre}: {p.stock} unidades\n"
+                            enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta.strip()})
+
+                        elif intencion_reporte:
+                            if comando == 'reporte':
+                                payload_instruccion = {"instruccion": "mostrar_menu_reporte"}
+                                enviar_a_n8n(numero_usuario, 'instruccion', payload_instruccion)
+                            else:
+                                comando_reporte = comando.replace(" ", "_")
+                                reporte_generado = generar_reporte(comando_reporte)
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': reporte_generado})
+
+                        elif intencion_borrar:
+                            ultima_venta = Venta.query.order_by(Venta.fecha_creacion.desc()).first()
+                            if not ultima_venta:
+                                mensaje_respuesta = "No hay ventas para borrar."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                            else:
+                                negocio.estado_conversacion = 'esperando_confirmacion_borrado'
+                                db.session.commit()
+                                mensaje_confirmacion = "¿Estás seguro de que deseas borrar la última venta? Responde *sí* para confirmar."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_confirmacion})
+
+                        else:
+                            mensaje_ayuda = ("Disculpa, no entendí ese comando. 🤔\n\n"
+                                             "Puedes probar con:\n`inventario`, `vender`, `reporte`, `gasté 50 en...` o `reiniciar inventario`.")
+                            enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_ayuda})
 
         except Exception as e:
             print(f"❌ ERROR DETALLADO EN EL PROCESAMIENTO:")
@@ -242,6 +373,7 @@ def webhook():
         
         return "OK", 200
 
+# --- Ruta de prueba ---
 @app.route("/")
 def index():
     return "¡El servidor para el bot de WhatsApp está funcionando!"

@@ -72,7 +72,7 @@ def enviar_a_n8n(numero_destino, tipo_mensaje, payload_mensaje):
         return False
 
 
-# --- FUNCIÓN PARA GENERAR REPORTES ---
+# --- FUNCIÓN PARA GENERAR REPORTES (MEJORADA) ---
 def generar_reporte(comando):
     hoy = date.today()
     start_date, end_date = None, None
@@ -171,7 +171,7 @@ def webhook():
 
                         if negocio.estado_conversacion:
                             estado = negocio.estado_conversacion
-                            # (Lógica de estados de conversación completa aquí)
+                            # ... (Lógica de estados de conversación completa aquí)
                             db.session.remove()
                             return "OK", 200
                         

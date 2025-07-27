@@ -166,10 +166,77 @@ def webhook():
 
                         if negocio.estado_conversacion:
                             estado = negocio.estado_conversacion
-                            # (Lógica de estados de conversación completa aquí)
-                            db.session.remove()
-                            return "OK", 200
-                        
+                            
+                            if estado == 'esperando_nombre_negocio':
+                                negocio.nombre = texto_mensaje; negocio.estado_conversacion = 'esperando_moneda'
+                                db.session.commit()
+                                mensaje = f"¡Perfecto! Negocio '{texto_mensaje}' registrado. Ahora, dime la moneda (ej. USD o VES)."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje})
+                                db.session.remove(); return "OK", 200
+                            
+                            elif estado == 'esperando_moneda':
+                                moneda = texto_mensaje.upper()
+                                if moneda in ['USD', 'VES']:
+                                    negocio.moneda_predeterminada = moneda; negocio.estado_conversacion = 'esperando_primer_producto'
+                                    db.session.commit()
+                                    mensaje = "👍 Moneda guardada. Vamos a añadir tu primer producto. ¿Cómo se llama?"
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje})
+                                else:
+                                    mensaje = "Moneda no válida. Por favor, responde solo con 'USD' o 'VES'."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje})
+                                db.session.remove(); return "OK", 200
+
+                            elif estado == 'esperando_primer_producto':
+                                negocio.estado_conversacion = f'esperando_stock_de_{texto_mensaje.lower()}'
+                                db.session.commit()
+                                mensaje = f"Ok, '{texto_mensaje}'. ¿Y cuántas unidades tienes en stock? (Solo el número)."
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje})
+                                db.session.remove(); return "OK", 200
+
+                            elif estado.startswith('esperando_stock_de_'):
+                                try:
+                                    stock = int(texto_mensaje); nombre_producto = estado.replace('esperando_stock_de_', '')
+                                    nuevo_producto = Producto(nombre=nombre_producto, stock=stock)
+                                    db.session.add(nuevo_producto); negocio.estado_conversacion = None; db.session.commit()
+                                    mensaje = f"✅ ¡Genial! He añadido '{nombre_producto}' con {stock} unidades.\n\n¡Todo listo! Ya puedes empezar a registrar ventas."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje})
+                                except ValueError:
+                                    mensaje = "Por favor, envía solo un número para el stock."
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje})
+                                db.session.remove(); return "OK", 200
+
+                            elif estado == 'esperando_confirmacion_reinicio':
+                                if texto_mensaje.lower() in ['si', 'sí']:
+                                    Venta.query.delete(); Producto.query.delete(); Gasto.query.delete()
+                                    negocio.estado_conversacion = None; db.session.commit()
+                                    mensaje_respuesta = '✅ ¡Hecho! Todos los datos han sido borrados.'
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                else:
+                                    negocio.estado_conversacion = None; db.session.commit()
+                                    mensaje_respuesta = '👍 Reinicio cancelado.'
+                                    enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                db.session.remove(); return "OK", 200
+                            
+                            elif estado == 'esperando_confirmacion_borrado':
+                                if texto_mensaje.lower() in ['si', 'sí']:
+                                    ultima_venta = Venta.query.order_by(Venta.fecha_creacion.desc()).first()
+                                    if ultima_venta:
+                                        producto_a_devolver = Producto.query.filter(db.func.lower(Producto.nombre) == db.func.lower(ultima_venta.producto_nombre)).first()
+                                        if producto_a_devolver:
+                                            producto_a_devolver.stock += ultima_venta.cantidad
+                                        info_venta_borrada = f"{ultima_venta.cantidad} x {ultima_venta.producto_nombre}"
+                                        db.session.delete(ultima_venta)
+                                        mensaje_respuesta = f"🗑️ Venta borrada ({info_venta_borrada}). El stock ha sido restaurado."
+                                    else:
+                                        mensaje_respuesta = "No hay ventas recientes para borrar."
+                                else:
+                                    mensaje_respuesta = '👍 Borrado cancelado.'
+                                
+                                negocio.estado_conversacion = None
+                                db.session.commit()
+                                enviar_a_n8n(numero_usuario, 'texto', {'mensaje': mensaje_respuesta})
+                                db.session.remove(); return "OK", 200
+
                         comando = texto_mensaje.lower()
                         doc = nlp(comando)
                         

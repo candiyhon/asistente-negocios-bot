@@ -32,7 +32,8 @@ class Venta(db.Model):
     cantidad = db.Column(db.Integer, nullable=False)
     precio_total = db.Column(db.Float, nullable=False)
     moneda = db.Column(db.String(10), nullable=False)
-    metodo_pago = db.Column(db.String(50), nullable=True)
+    # --- NUEVA COLUMNA AÑADIDA ---
+    metodo_pago = db.Column(db.String(50), nullable=True) # Guardará 'efectivo', 'punto', etc.
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Producto(db.Model):
